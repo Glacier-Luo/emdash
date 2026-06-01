@@ -472,13 +472,15 @@ function stableOrder(value: Record<string, unknown>): Record<string, unknown> {
 	const ordered: Record<string, unknown> = {};
 	for (const k of keys) {
 		const v = value[k];
-		ordered[k] =
-			v !== null && typeof v === "object" && !Array.isArray(v)
-				? stableOrder(v as Record<string, unknown>)
-				: v;
+		if (isRecord(v)) {
+			ordered[k] = stableOrder(v);
+		} else {
+			ordered[k] = v;
+		}
 	}
 	return ordered;
 }
+
 
 async function getEmDashCollectionUncached<T extends string, D = InferCollectionData<T>>(
 	type: T,
