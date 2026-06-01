@@ -35,7 +35,8 @@ export function isMissingColumnError(error: unknown): boolean {
 	if (message.includes("no such column")) return true;
 
 	// PostgreSQL SQLSTATE 42703: 'column "foo" does not exist'
-	if (message.includes("does not exist") && message.includes("column")) return true;
+	// Exclude "relation" to avoid false positives on table names containing "column"
+	if (message.includes("does not exist") && message.includes("column") && !message.includes("relation")) return true;
 
 	return false;
 }

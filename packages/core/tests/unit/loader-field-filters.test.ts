@@ -349,4 +349,25 @@ describe("Loader field filters", () => {
 		expect(result.entries).toHaveLength(1);
 		expect(result.entries[0].data.title).toBe("Early");
 	});
+
+	it("should return empty results for non-existent column in where filter", async () => {
+		await createPost("Post A", { series: "alpha" });
+
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const loader = emdashLoader();
+		const result = await runWithContext({ editMode: false, db }, () =>
+			loader.loadCollection!({
+				filter: {
+					type: "post",
+					where: { nonexistent_column: "value" },
+				},
+			}),
+		);
+
+		expect(result.entries).toHaveLength(0);
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("no such column"),
+		);
+		warnSpy.mockRestore();
+	});
 });
