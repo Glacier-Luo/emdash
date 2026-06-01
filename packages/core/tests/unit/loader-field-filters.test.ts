@@ -1,5 +1,5 @@
 import type { Kysely } from "kysely";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { handleContentCreate } from "../../src/api/index.js";
 import type { Database } from "../../src/database/types.js";
@@ -278,6 +278,57 @@ describe("Loader field filters", () => {
 
 		expect(result.entries).toHaveLength(1);
 		expect(result.entries[0].data.title).toBe("Tech Post");
+	});
+
+	it("should skip null/undefined values in where filter", async () => {
+		await createPost("Post A", { series: "alpha" });
+		await createPost("Post B", { series: "beta" });
+
+		const loader = emdashLoader();
+		const result = await runWithContext({ editMode: false, db }, () =>
+			loader.loadCollection!({
+				filter: {
+					type: "post",
+					where: { series: null as unknown as string },
+				},
+			}),
+		);
+
+		// null values are skipped, so no filter is applied
+		expect(result.entries).toHaveLength(2);
+	});
+
+	it("should warn and skip range operators on taxonomy keys", async () => {
+		await db
+			.insertInto("taxonomies" as never)
+			.values({
+				id: "tax_cat_range",
+				name: "category",
+				slug: "test",
+				label: "Test",
+			} as never)
+			.execute();
+
+		await createPost("Post A");
+		await createPost("Post B");
+
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const loader = emdashLoader();
+		const result = await runWithContext({ editMode: false, db }, () =>
+			loader.loadCollection!({
+				filter: {
+					type: "post",
+					where: { category: { gte: "a" } as unknown as string },
+				},
+			}),
+		);
+
+		// Range on taxonomy is ignored, returns all entries
+		expect(result.entries).toHaveLength(2);
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("range operators are not supported on taxonomy"),
+		);
+		warnSpy.mockRestore();
 	});
 
 	it("should handle range with only one bound (lt without gte)", async () => {

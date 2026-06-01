@@ -20,7 +20,7 @@ import { decodeCursor, encodeCursor } from "./database/repositories/types.js";
 import { validateIdentifier } from "./database/validate.js";
 import type { Database } from "./index.js";
 import { getRequestContext } from "./request-context.js";
-import { isMissingTableError } from "./utils/db-errors.js";
+import { isMissingColumnError, isMissingTableError } from "./utils/db-errors.js";
 
 const FIELD_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -425,7 +425,11 @@ function buildFieldConditions(
 	const conditions: ReturnType<typeof sql>[] = [];
 
 	for (const [key, value] of Object.entries(fields)) {
-		if (!FIELD_NAME_PATTERN.test(key)) continue;
+		if (!FIELD_NAME_PATTERN.test(key)) {
+			console.warn(`[emdash] where filter: invalid field name "${key}" ignored`);
+			continue;
+		}
+		if (value == null) continue;
 		const ref = tablePrefix ? sql.ref(`${tablePrefix}.${key}`) : sql.ref(key);
 
 		if (isWhereRange(value)) {
@@ -476,7 +480,14 @@ export interface CollectionFilter {
 	 */
 	cursor?: string;
 	/**
-	 * Filter by field values or taxonomy terms
+	 * Filter by field values, taxonomy terms, or ranges.
+	 *
+	 * Taxonomy names are detected automatically and filtered via JOIN.
+	 * Other keys are treated as column filters on the content table.
+	 *
+	 * @example { category: 'news' } - taxonomy term
+	 * @example { series: 'main' } - exact match on a content field
+	 * @example { published_at: { gte: '2024-01-01', lt: '2025-01-01' } } - date range
 	 */
 	where?: Record<string, WhereValue>;
 	/**
@@ -593,7 +604,7 @@ export function emdashLoader(): LiveLoader<EntryData, EntryFilter, CollectionFil
 				const status = filter?.status || "published";
 				const limit = filter?.limit;
 				const cursor = filter?.cursor;
-				const where = filter?.where as Record<string, WhereValue> | undefined;
+				const where = filter?.where;
 				const orderBy = filter?.orderBy;
 				const locale = filter?.locale;
 
@@ -615,13 +626,22 @@ export function emdashLoader(): LiveLoader<EntryData, EntryFilter, CollectionFil
 					const taxNames = await getTaxonomyNames(db);
 
 					for (const [key, value] of Object.entries(where)) {
-						if (taxNames.has(key) && !isWhereRange(value)) {
-							// Only one taxonomy JOIN is supported per query;
-							// additional taxonomy keys are ignored.
-							if (!taxonomyFilter) {
-								const slugs = Array.isArray(value) ? value : [value];
-								taxonomyFilter = { name: key, slugs };
+						if (value == null) continue;
+						if (taxNames.has(key)) {
+							if (isWhereRange(value)) {
+								console.warn(
+									`[emdash] where filter: range operators are not supported on taxonomy "${key}", ignored`,
+								);
+								continue;
 							}
+							if (taxonomyFilter) {
+								console.warn(
+									`[emdash] where filter: only one taxonomy is supported per query, "${key}" ignored`,
+								);
+								continue;
+							}
+							const slugs = Array.isArray(value) ? value : [value];
+							taxonomyFilter = { name: key, slugs };
 						} else {
 							fieldFilters[key] = value;
 						}
@@ -741,13 +761,17 @@ export function emdashLoader(): LiveLoader<EntryData, EntryFilter, CollectionFil
 					},
 				};
 			} catch (error) {
-				// Handle missing table gracefully - return empty collection.
-				// This happens before migrations have run.
-				if (isMissingTableError(error)) {
+				// Handle missing table/column gracefully - return empty collection.
+				// Missing table happens before migrations have run.
+				// Missing column happens when a where filter references a non-existent field.
+				const message = error instanceof Error ? error.message : String(error);
+				if (isMissingTableError(error) || isMissingColumnError(error)) {
+					if (isMissingColumnError(error)) {
+						console.warn(`[emdash] where filter: ${message}`);
+					}
 					return { entries: [] };
 				}
 
-				const message = error instanceof Error ? error.message : String(error);
 				return {
 					error: new Error(`Failed to load collection: ${message}`),
 				};

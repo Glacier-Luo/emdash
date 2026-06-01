@@ -464,16 +464,20 @@ function collectionCacheKey(type: string, filter?: CollectionFilter): string {
 }
 
 function stableStringify(value: Record<string, unknown>): string {
+	return JSON.stringify(stableOrder(value));
+}
+
+function stableOrder(value: Record<string, unknown>): Record<string, unknown> {
 	const keys = Object.keys(value).toSorted();
 	const ordered: Record<string, unknown> = {};
 	for (const k of keys) {
 		const v = value[k];
 		ordered[k] =
 			v !== null && typeof v === "object" && !Array.isArray(v)
-				? stableStringify(v as Record<string, unknown>)
+				? stableOrder(v as Record<string, unknown>)
 				: v;
 	}
-	return JSON.stringify(ordered);
+	return ordered;
 }
 
 async function getEmDashCollectionUncached<T extends string, D = InferCollectionData<T>>(

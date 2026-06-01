@@ -23,6 +23,24 @@ function messageOf(error: unknown): string {
 }
 
 /**
+ * Returns true when `error` is a "column does not exist" error.
+ * Used to handle where filters that reference non-existent field names
+ * gracefully (return empty results) instead of propagating a SQL error.
+ */
+export function isMissingColumnError(error: unknown): boolean {
+	const message = messageOf(error);
+	if (!message) return false;
+
+	// SQLite / D1: "no such column: foo"
+	if (message.includes("no such column")) return true;
+
+	// PostgreSQL SQLSTATE 42703: 'column "foo" does not exist'
+	if (message.includes("does not exist") && message.includes("column")) return true;
+
+	return false;
+}
+
+/**
  * Returns true when `error` is a "table does not exist" error across the
  * dialects EmDash supports (D1/SQLite and PostgreSQL). Used by runtime
  * probes to treat pre-migration databases as empty without logging a scary
